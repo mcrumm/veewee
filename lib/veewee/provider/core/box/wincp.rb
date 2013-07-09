@@ -7,6 +7,14 @@ module Veewee
         def wincp(localfile,remotefile,options={})
           raise Veewee::Error,"Box is not running" unless self.running?
 
+          if self.exec("cmd.exe /C dir #{wget_vbs_file} > NUL",{:exitcode=>"*"}).status != 0
+            env.ui.warn "Creating wget.vbs"
+            create_wget_vbs_command do |command_chunk, chunk_num|
+              self.exec("cmd.exe /C echo \"Rendering '#{wget_vbs_file}' chunk #{chunk_num}\" && #{command_chunk}")
+            end
+          end
+
+          
           # Calculate an available kickstart port which we will use for wincp
           definition.kickstart_port = "7000" if definition.kickstart_port.nil?
           guessed_port=guess_free_port(definition.kickstart_port.to_i,7199).to_s
@@ -15,14 +23,6 @@ module Veewee
             definition.kickstart_port=guessed_port.to_s
           end
 
-          if self.exec("cmd.exe /C dir #{wget_vbs_file} > %TEMP%\\null",{:exitcode=>"*"}).status != 0
-            env.ui.warn "Creating wget.vbs"
-            create_wget_vbs_command do |command_chunk, chunk_num|
-              self.exec("cmd.exe /C echo \"Rendering '#{wget_vbs_file}' chunk #{chunk_num}\" && #{command_chunk}")
-            end
-          end
-
-          
           env.ui.warn "Spinning up a wait_for_http_request on http://#{host_ip_as_seen_by_guest}:#{definition.kickstart_port}#{localfile}"
           webthread=allow_for_http_request(localfile,{
               :port => definition.kickstart_port,

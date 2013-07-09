@@ -9,9 +9,12 @@ module Veewee
     attr_accessor :name
     attr_accessor :env
     attr_accessor :path
+    attr_accessor :params
 
-    attr_accessor :cpu_count, :memory_size, :video_memory_size, :iso_file
-    attr_accessor :disk_size, :disk_format, :disk_variant
+    attr_writer   :cpu_count, :memory_size
+
+    attr_accessor :video_memory_size, :iso_file
+    attr_accessor :disk_size, :disk_format, :disk_variant, :disk_count
 
     attr_accessor :os_type_id
 
@@ -34,13 +37,18 @@ module Veewee
 
     attr_accessor :use_hw_virt_ext, :use_pae, :hostiocache, :use_sata
 
-    attr_accessor :iso_dowload_timeout, :iso_src, :iso_md5, :iso_download_instructions
+    attr_accessor :iso_dowload_timeout, :iso_src, :iso_md5, :iso_sha1 , :iso_download_instructions
 
     attr_accessor :virtualbox
     attr_accessor :vmfusion
     attr_accessor :kvm
     attr_accessor :add_shares
     attr_accessor :vmdk_file
+
+    attr_accessor :skip_iso_transfer
+    attr_accessor :skip_nat_mapping
+
+    attr_accessor :force_ssh_port
 
     def ui
       return @_ui if defined?(@_ui)
@@ -60,11 +68,11 @@ module Veewee
         @path = path
       end
 
-      # Default is 1 CPU + 256 Mem of memory + 8 Mem of video memory
-      @cpu_count = '1' ; @memory_size = '256'; @video_memory_size = '8'
+      # Default is 1 CPU + 256 MB of memory + 10 MB of video memory
+      @cpu_count = '1' ; @memory_size = '256'; @video_memory_size = '10'
 
       # Default there is no ISO file mounted
-      @iso_file = nil, @iso_src = nil ; @iso_md5 = nil ; @iso_download_timeout = 1000 ; @iso_download_instructions = nil
+      @iso_file = nil, @iso_src = nil ; @iso_md5 = nil ; @iso_sha1;  @iso_download_timeout = 1000 ; @iso_download_instructions = nil
 
       # Shares to add
       @add_shares = []
@@ -77,7 +85,7 @@ module Veewee
       @postinstall_files = [] ; @postinstall_timeout = 10000 ;
 
       @iso_file = ""
-      @disk_size = '10240' ; @disk_format = 'VDI' ; @disk_variant = 'Standard'
+      @disk_size = '10240' ; @disk_format = 'VDI' ; @disk_variant = 'Standard' ; @disk_count = 1
       @use_sata = true
 
       #        :hostiocache => 'off' ,
@@ -97,6 +105,13 @@ module Veewee
       @vmfusion = { :vm_options => {} }
       @kvm = { :vm_options => {} }
 
+      @skip_iso_transfer = false
+
+      @skip_nat_mapping = false
+
+      @force_ssh_port = false
+
+      @params = {}
     end
 
 
@@ -188,6 +203,26 @@ module Veewee
       return true
     end
 
+    def memory_size
+      if ENV['VEEWEE_MEMORY_SIZE'].nil?
+        return @memory_size
+      else
+        return ENV['VEEWEE_MEMORY_SIZE'].to_i
+      end
+    end
+
+    def cpu_count
+      if ENV['VEEWEE_CPU_COUNT'].nil?
+        return @cpu_count
+      else
+        return ENV['VEEWEE_CPU_COUNT'].to_i
+      end
+    end
+
+    def box
+      env.get_box(name)
+    end
+
     private
 
     def ostype_valid?
@@ -197,10 +232,6 @@ module Veewee
       else
         return true
       end
-    end
-
-    def method_missing(m, *args, &block)
-      env.logger.info "There's no attribute #{m} defined for definition #{@name}-- ignoring it"
     end
 
   end #End Class

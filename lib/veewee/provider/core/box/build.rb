@@ -3,6 +3,20 @@ module Veewee
     module Core
       module BoxCommand
 
+        def run_hook(name)
+          hooks = definition.instance_variable_get(:@hooks)
+          if ! hooks.nil?
+            hook = hooks[name]
+            if hook.nil?
+              ui.info "Hook ##{name} is not defined"
+            else
+              raise Veewee::Error, "Hook is not callable" if ! hook.respond_to?(:call)
+              ui.info "Running ##{name} hook"
+              hook.call
+            end
+          end
+        end
+
         def build(options={})
 
           if definition.nil?
@@ -39,11 +53,17 @@ module Veewee
             raise Veewee::Error, "The box should have been deleted by now. Something went terribly wrong. Sorry"
           end
 
+          run_hook(:before_create)
+
           self.create(options)
+
+          run_hook(:after_create)
 
           # Check the GUI mode required
           env.logger.info "Provider asks the box to start: GUI enabled? #{!options['nogui']}"
           self.up(options)
+
+          run_hook(:after_up)
 
           # Waiting for it to boot
           ui.info "Waiting #{definition.boot_wait.to_i} seconds for the machine to boot"
@@ -66,7 +86,10 @@ module Veewee
           })
 
           # Type the boot sequence
-          self.console_type(boot_sequence)
+          Thread.new do
+            self.console_type(boot_sequence)
+            run_hook(:after_boot_sequence)
+          end
 
           self.handle_kickstart(options)
 
@@ -78,15 +101,22 @@ module Veewee
             sleep 2
           end
 
+          if ! definition.skip_iso_transfer then
+            self.transfer_buildinfo(options)
+          end
 
-          self.transfer_buildinfo(options)
+          # Transfer the VEEWEE_<params> environment variables + definition.params
+          # into .veewee_params
+          self.transfer_params(options)
 
           # Filtering post install files based upon --postinstall-include and --postinstall--exclude
           definition.postinstall_files=filter_postinstall_files(options)
 
           self.handle_postinstall(options)
 
-          ui.success "The box #{name} was build successfully!"
+          run_hook(:after_postinstall)
+
+          ui.success "The box #{name} was built successfully!"
           ui.info "You can now login to the box with:"
           if (definition.winrm_user && definition.winrm_password)
             env.ui.info winrm_command_string
@@ -202,7 +232,6 @@ module Veewee
         # It requires a box(to login to) and a definition(listing the postinstall files)
         def handle_postinstall(options)
 
-          # Transfer all postinstall files
           definition.postinstall_files.each do |postinstall_file|
             # Filenames of postinstall_files are relative to their definition
             filename=File.join(definition.path,postinstall_file)
@@ -215,7 +244,7 @@ module Veewee
           # Prepare a pre_poinstall file if needed (not nil , or not empty)
           unless definition.pre_postinstall_file.to_s.empty?
             pre_filename=File.join(definition.path, definition.pre_postinstall_file)
-            self.copy_to_box(filename,File.basename(pre_filename))
+            self.copy_to_box(pre_filename,File.basename(pre_filename))
             if (definition.winrm_user && definition.winrm_password)
               # not implemented on windows yet
             else
@@ -239,6 +268,8 @@ module Veewee
                 # Upload the pre postinstall script if not already transfered
                 command = "./" + File.basename(pre_filename)
                 command = sudo(command) + " ./"+File.basename(filename)
+
+                self.exec(command)
               else
                 if (definition.winrm_user && definition.winrm_password)
                   # no sudo on windows, batch files only please?
@@ -247,8 +278,6 @@ module Veewee
                   self.exec(sudo("./"+File.basename(filename)))
                 end
               end
-
-              self.exec(command)
 
             else
               env.logger.info "Skipping postinstallfile #{postinstall_file}"
@@ -278,6 +307,41 @@ module Veewee
           end
         end
 
+        def transfer_params(options)
+          filename = ".veewee_params"
+          content = ""
+
+          params = {}
+
+          # First check params in definition
+          params.merge!(definition.params) unless definition.params.nil?
+
+          # Environment vars override
+          veewee_env = ENV.select{|key,value| key.to_s.match(/^VEEWEE_/) }
+          veewee_env.each do |key,value|
+            params[key.gsub(/^VEEWEE_/,'')] = value
+          end
+
+          # Iterate over params
+          params.each do |key,value|
+            content += "export #{key}='#{value}'\n"
+          end
+
+          begin
+            infofile=Tempfile.open("#{filename}")
+            # Force binary mode to prevent windows from putting CR-LF end line style
+            # http://www.ruby-forum.com/topic/127453#568546
+            infofile.binmode
+            infofile.puts "#{content}"
+            infofile.rewind
+            infofile.close
+            self.copy_to_box(infofile.path,filename)
+            infofile.delete
+          rescue RuntimeError => ex
+            ui.error("Error transfering file #{filename} failed, possible not enough permissions to write? #{ex}",:prefix => false)
+            raise Veewee::Error,"Error transfering file #{filename} failed, possible not enough permissions to write? #{ex}"
+          end
+        end
 
       end #Module
     end #Module
