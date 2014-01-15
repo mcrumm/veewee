@@ -20,6 +20,8 @@ pkg/*
 virtualfloppy.vfd
 *.swp
 AutoPartition.app
+.ruby-version
 .rbenv-gemsets
 .ruby-version
 .project
+.ruby-version
